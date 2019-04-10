@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zzyandzzy/ptrss/util"
+    "os"
 )
 
 const (
@@ -76,7 +77,8 @@ func Instance() *sql.DB {
 	if dbInstance != nil {
 		return dbInstance
 	} else {
-		dbInstance, err := sql.Open("sqlite3", "./rss.db")
+        rssDir,_ := os.Getwd()
+		dbInstance, err := sql.Open("sqlite3", rssDir + "./rss.db")
 		util.CheckErr(err)
 		return dbInstance
 	}
