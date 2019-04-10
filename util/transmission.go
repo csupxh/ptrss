@@ -11,9 +11,10 @@ import (
 type TransmissionData struct {
 	Method    string      `json:"method"`
 	Arguments interface{} `json:"arguments"`
-	Tas       string      `json:"tas"`
+	Tag       string      `json:"tag"`
 }
 
+// 处理tr add结构体
 type TransmissionAdd struct {
 	MetaInfo    string `json:"metainfo,omitempty"`
 	Filename    string `json:"filename"`
@@ -32,28 +33,30 @@ type TransmissionAddResult struct {
 }
 
 const (
-	footer     string = "/transmission/rpc"
-	xSessionId string = "X-Transmission-Session-Id"
+	trFooter              string = "/transmission/rpc"
+	trSessionIdHeader     string = "X-Transmission-Session-Id"
+	authorizationHeader          = "Authorization"
+	contentTypeHeader            = "Content-Type"
+	jsonHeader        = "application/json"
 )
 
 var (
-	url, sessionId string
-	isSessionId    bool
+	trSessionId string
 )
 
 type TransmissionCallback func(body []byte, res *http.Response, result TransmissionResult, err error)
 type TransmissionAddCallback func(body []byte, res *http.Response, result TransmissionAddResult, err error)
 
 func TrExec(tr Client, data TransmissionData, callback TransmissionCallback) {
-	url = tr.Local + footer
+	trUrl := tr.Local + trFooter
 	jsonData, _ := json.Marshal(data)
 	payload := strings.NewReader(string(jsonData))
-	req, _ := http.NewRequest("POST", url, payload)
+	req, _ := http.NewRequest("POST", trUrl, payload)
 	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(tr.User+":"+tr.Pwd))
-	req.Header.Add("Authorization", auth)
-	req.Header.Add("Content-Type", "application/json")
-	if isSessionId {
-		req.Header.Add(xSessionId, sessionId)
+	req.Header.Add(authorizationHeader, auth)
+	req.Header.Add(contentTypeHeader, jsonHeader)
+	if trSessionId != "" {
+		req.Header.Add(trSessionIdHeader, trSessionId)
 	}
 	res, err := http.DefaultClient.Do(req)
 	var result TransmissionResult
@@ -61,13 +64,12 @@ func TrExec(tr Client, data TransmissionData, callback TransmissionCallback) {
 		callback(nil, res, result, err)
 	} else {
 		defer res.Body.Close()
-		body, _ := ioutil.ReadAll(res.Body)
 		code := res.StatusCode
 		if code == 409 {
-			isSessionId = true
-			sessionId = res.Header.Get(xSessionId)
+			trSessionId = res.Header.Get(trSessionIdHeader)
 			TrExec(tr, data, callback)
 		} else {
+			body, _ := ioutil.ReadAll(res.Body)
 			if res.StatusCode == 200 {
 				json.Unmarshal(body, &result)
 			}

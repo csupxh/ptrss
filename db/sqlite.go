@@ -2,9 +2,10 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zzyandzzy/ptrss/util"
-    "os"
+	"os"
 )
 
 const (
@@ -42,7 +43,8 @@ const (
 		  cid INTEGER,
 		  path VARCHAR(256),
 		  pause INTEGER DEFAULT 1,
-		  refresh INTEGER DEFAULT 300
+		  refresh INTEGER DEFAULT 300,
+		  category VARCHAR(256)
 		)
 `
 )
@@ -73,42 +75,42 @@ func Init() {
 	}
 }
 
-func Instance() *sql.DB {
+func Instance() (*sql.DB, error) {
 	if dbInstance != nil {
-		return dbInstance
+		return dbInstance, nil
 	} else {
-        rssDir,_ := os.Getwd()
-		dbInstance, err := sql.Open("sqlite3", rssDir + "./rss.db")
-		util.CheckErr(err)
-		return dbInstance
+		rssDir, _ := os.Getwd()
+		dbInstance, err := sql.Open("sqlite3", rssDir+"./rss.db")
+		return dbInstance, err
 	}
+}
+
+func GetInstance() *sql.DB {
+	instance, err := Instance()
+	if err != nil {
+		fmt.Println("数据库不存在或缺失参数，请检查参数后重新运行")
+		panic(err)
+	}
+	return instance
 }
 
 // 判断表是否存在
 func ExistTable(tableName string) bool {
-	sqlStmt, err := Instance().Prepare("SELECT COUNT(*)  FROM main.sqlite_master WHERE type='table' AND name = ?")
+	sqlStmt, err := GetInstance().Prepare("SELECT name FROM main.sqlite_master WHERE type='table' AND name = ?")
 	defer sqlStmt.Close()
 	util.CheckErr(err)
-	result, err := sqlStmt.Query(tableName)
-	defer result.Close()
-	util.CheckErr(err)
-	for result.Next() {
-		var id int
-		result.Scan(&id)
-		if id != 0 {
-			return true
-		}
-	}
-	return false
+	var name string
+	sqlStmt.QueryRow(tableName).Scan(&name)
+	return name == tableName
 }
 
 func CreateTable(sqlStmt string) {
-	_, err := Instance().Exec(sqlStmt)
+	_, err := GetInstance().Exec(sqlStmt)
 	util.CheckErr(err)
 }
 
 func InsertDatas(args ... interface{}) bool {
-	stmt, err := Instance().Prepare(`INSERT INTO main.t_data
+	stmt, err := GetInstance().Prepare(`INSERT INTO main.t_data
 				(tid, guid, hash, title, name, url, link, rtype, size, created) 
 				VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	util.CheckErr(err)
@@ -116,20 +118,20 @@ func InsertDatas(args ... interface{}) bool {
 }
 
 func InsertData(guid string, title string, url string, link string, rtype string, size int, created string) bool {
-	stmt, err := Instance().Prepare(`INSERT INTO main.t_data(guid, title, url, link, rtype, size, created) 
+	stmt, err := GetInstance().Prepare(`INSERT INTO main.t_data(guid, title, url, link, rtype, size, created) 
 				VALUES (?,?,?,?,?,?,?)`)
 	util.CheckErr(err)
 	return Insert(stmt, guid, title, url, link, rtype, size, created)
 }
 
 func InsertClient(args ... interface{}) bool {
-	stmt, err := Instance().Prepare(`INSERT INTO main.t_client(name, local, user, pwd) VALUES (?,?,?,?)`)
+	stmt, err := GetInstance().Prepare(`INSERT INTO main.t_client(name, local, user, pwd) VALUES (?,?,?,?)`)
 	util.CheckErr(err)
 	return Insert(stmt, args...)
 }
 
 func InsertRSS(args ... interface{}) bool {
-	stmt, err := Instance().Prepare(`INSERT INTO main.t_rss(url, cid, path, pause, refresh) VALUES (?,?,?,?,?)`)
+	stmt, err := GetInstance().Prepare(`INSERT INTO main.t_rss(url, cid, path, pause, refresh, category) VALUES (?,?,?,?,?,?)`)
 	util.CheckErr(err)
 	return Insert(stmt, args...)
 }
@@ -146,7 +148,7 @@ func Insert(stmt *sql.Stmt, args ... interface{}) bool {
 }
 
 func QueryClient(clientName string) Client {
-	stmt, err := Instance().Prepare("SELECT * FROM main.t_client WHERE name = ?")
+	stmt, err := GetInstance().Prepare("SELECT * FROM main.t_client WHERE name = ?")
 	defer stmt.Close()
 	util.CheckErr(err)
 	var client Client
@@ -155,7 +157,7 @@ func QueryClient(clientName string) Client {
 }
 
 func QueryRSS(clientName string) []RSS {
-	stmt, err := Instance().Prepare(`SELECT t_rss.id,url,path,pause,refresh
+	stmt, err := GetInstance().Prepare(`SELECT t_rss.id,url,path,pause,refresh
 				FROM main.t_rss,main.t_client 
 				WHERE t_rss.cid = t_client.id AND t_client.name = ?`)
 	defer stmt.Close()
@@ -177,7 +179,7 @@ func QueryRSS(clientName string) []RSS {
 }
 
 func ExistData(guid string) bool {
-	stmt, err := Instance().Prepare("SELECT id FROM main.t_data WHERE guid = ?")
+	stmt, err := GetInstance().Prepare("SELECT id FROM main.t_data WHERE guid = ?")
 	defer stmt.Close()
 	util.CheckErr(err)
 	var id int
@@ -186,7 +188,7 @@ func ExistData(guid string) bool {
 }
 
 func ExistRSS(url string) bool {
-	stmt, err := Instance().Prepare("SELECT id FROM main.t_rss WHERE url = ?")
+	stmt, err := GetInstance().Prepare("SELECT id FROM main.t_rss WHERE url = ?")
 	defer stmt.Close()
 	util.CheckErr(err)
 	var id int

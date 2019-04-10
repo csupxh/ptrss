@@ -22,7 +22,7 @@ func TestAdd(t *testing.T) {
 }
 
 func TestConnect(t *testing.T) {
-	tr := Client{"http://192.168.1.110" + ":" + strconv.Itoa(9091), "", ""}
+	tr := Client{"http://192.168.1.110" + ":" + strconv.Itoa(9091), "zzyandzzy", "zzyianzhi1128"}
 	TrConnect(tr, func(body []byte, res *http.Response, result TransmissionResult, err error) {
 		fmt.Println(string(body))
 		fmt.Println(result.Arguments.(map[string]interface{})["activeTorrentCount"])

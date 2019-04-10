@@ -10,7 +10,7 @@ func TestInit(t *testing.T) {
 }
 
 func TestExistTable(t *testing.T) {
-	fmt.Println(ExistTable("t_das"))
+	fmt.Println(ExistTable("t_rss"))
 }
 
 func TestInsertClient(t *testing.T) {

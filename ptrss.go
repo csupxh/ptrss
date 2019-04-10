@@ -15,21 +15,25 @@ type FLAGS struct {
 	Version bool `short:"v" long:"version" description:"show version num" global:"true"`
 	Client  struct {
 		Name string `long:"name" required:"true" description:"客服端类型 (tr 或 qb)"`
-		Host string `long:"host" required:"true" description:"客服端地址 (http://192.168.0.1)"`
+		Host string `long:"host" required:"true" description:"客服端地址 (http://127.0.0.1)"`
 		Port int    `long:"port" required:"true" description:"客服端端口 (9091)"`
 		User string `long:"user" required:"true" description:"客服端登录用户 (root)"`
 		Pwd  string `long:"pwd" required:"true" description:"客服端登录密码 (root)"`
 	} `command:"client" description:"设置客服端参数"`
 	Add struct {
-		Url     string `long:"url" required:"true" description:"添加RSS地址 (请把地址用\"\"包围)"`
-		Client  string `long:"client" required:"true" description:"使用哪种客服端下载 (tr 或 qb)"`
-		Path    string `long:"path" description:"设置下载路径 (完整路径: /volume2/download/) [默认: 客服端设置]"`
-		Pause   string `long:"pause" description:"是否暂停下载 (true 或 false)[默认: true]"`
-		Refresh int    `long:"refresh" description:"设置自动刷新时间 (单位: 秒)[默认: 300]"`
-		Filter  struct {
-			Name string `long:"name" description:"根据名称过滤rss内容"`
-			Size int    `long:"size" description:"根据大小过滤rss内容"`
-			Path string `long:"path" description:"设置过滤下载路径 [默认: 客服端设置]"`
+		Url      string `long:"url" required:"true" description:"添加RSS地址 (请把地址用\"\"包围)"`
+		Client   string `long:"client" required:"true" description:"使用哪种客服端下载 (tr 或 qb)"`
+		Download bool   `long:"download" required:"true" description:"是否下载rss中已存在的订阅 (true 或 false)"`
+		Path     string `long:"path" description:"设置下载路径 (完整路径: /volume2/download/) [默认: 客服端设置]"`
+		Pause    bool   `long:"pause" description:"是否暂停下载 (true 或 false)[默认: true]"`
+		Refresh  int    `long:"refresh" description:"设置自动刷新时间 (单位: 秒)[默认: 300]"`
+		Category string `long:"category" description:"设置分类"`
+		//Remove bool   `long:"remove" description:"是否在RSS删除文件自动删除本地文件 [默认: false]"`
+		Filter struct {
+			Name    string `long:"name" description:"根据名称过滤rss内容 (只需部分名称即可)"`
+			MaxSize int    `long:"maxsize" description:"指定最大文件大小 (单位: MB)"`
+			MinSize int    `long:"minsize" description:"指定最小文件大小 (单位: MB)"`
+			Path    string `long:"path" description:"设置过滤下载路径 [默认: 客服端设置]"`
 		} `command:"filter" description:"添加RSS过滤器"`
 	} `command:"add" description:"添加RSS订阅"`
 	Get struct {
@@ -43,6 +47,7 @@ var (
 	defaultRefresh      = 300
 	defaultTrClientName = "tr"
 	flags               = FLAGS{}
+	cronInstance        *cron.Cron
 )
 
 func main() {
@@ -53,19 +58,19 @@ func main() {
 func Cmd() {
 	gocmd.HandleFlag("Add", func(cmd *gocmd.Cmd, args []string) error {
 		pause := defaultPause
-		if flags.Add.Pause == "false" || flags.Add.Pause == "FALSE" {
-			pause = false
+		if pause != flags.Add.Pause {
+			pause = flags.Add.Pause
 		}
 		refresh := defaultRefresh
 		if flags.Add.Refresh != 0 {
 			refresh = flags.Add.Refresh
 		}
-		c := cron.New()
-		c.AddFunc("*/"+strconv.Itoa(refresh)+" * * * * ?", func() {
-			AddRSS(flags.Add.Client, flags.Add.Url, flags.Add.Path, pause, refresh)
+		cronInstance := cron.New()
+		err := cronInstance.AddFunc("*/"+strconv.Itoa(refresh)+" * * * * ?", func() {
+			AddRSS(flags.Add.Client, flags.Add.Url, flags.Add.Path, pause, refresh, flags.Add.Download, flags.Add.Category)
 		})
-		c.Start()
-		defer c.Stop()
+		util.CheckErr(err)
+		cronInstance.Start()
 		select {}
 		return nil
 	})
@@ -104,59 +109,72 @@ func Cmd() {
 
 	// Init the app
 	gocmd.New(gocmd.Options{
-		Name:        "PT RSS",
-		Version:     "0.0.1",
-		Description: "一个简单高效的PT RSS自动化工具",
-		Flags:       &flags,
-		ConfigType:  gocmd.ConfigTypeAuto,
+		Name:    "PT RSS",
+		Version: "0.0.1",
+		Description: `一个简单高效的PT RSS自动化工具
+
+
+ _______ _________ _______  _______  _______ 
+(  ____ )\__   __/(  ____ )(  ____ \(  ____ \
+| (    )|   ) (   | (    )|| (    \/| (    \/
+| (____)|   | |   | (____)|| (_____ | (_____ 
+|  _____)   | |   |     __)(_____  )(_____  )
+| (         | |   | (\ (         ) |      ) |
+| )         | |   | ) \ \__/\____) |/\____) |
+|/          )_(   |/   \__/\_______)\_______)
+
+
+
+`,
+		Flags:      &flags,
+		ConfigType: gocmd.ConfigTypeAuto,
 	})
 }
 
-func AddRSS(clientName string, url string, path string, pause bool, refresh int) {
+func AddRSS(clientName string, url string, path string, pause bool, refresh int, download bool, category string) {
 	clientDB := db.QueryClient(clientName)
 	if clientDB.Id != 0 {
 		client := util.Client{Local: clientDB.Local, User: clientDB.User, Pwd: clientDB.Pwd}
 		util.GetBody(url, func(channel util.RSSChannel) {
-			var input string
+			isOneRSS := false
 			// 先判断rss有没有添加进数据库
 			// 没有说明是第一次添加
 			if !db.ExistRSS(url) {
-				db.InsertRSS(url, clientDB.Id, path, pause, refresh)
-				fmt.Printf("获取到 %s 共 %d 条信息\n是否要将全部添加到客服端？(Y/n): ",
-					channel.Title, len(channel.Items))
-				_, err := fmt.Scanf("%s", &input)
-				if err != nil {
-					fmt.Println("输入错误，默认不添加到客服端")
-				}
+				isOneRSS = true
+				db.InsertRSS(url, clientDB.Id, path, pause, refresh, category)
+				fmt.Printf("获取到 %s 共 %d 条信息\n: ", channel.Title, len(channel.Items))
 			}
 			for _, rssItem := range channel.Items {
-				// 判断是否是第一次
-				if input == "Y" || input == "y" {
-					// 下载rss到tr客服端
-					addRSSClient(clientName, path, pause, client, rssItem)
-				} else if input == "n" || input == "N" {
-					// 直接添加到数据库
-					db.InsertData(rssItem.GuidValue, rssItem.Title, rssItem.Enclosure.Url, rssItem.Link,
-						rssItem.Enclosure.Type, rssItem.Enclosure.Length, rssItem.PubDate)
-				}
-				// 不是第一次
-				// 判断当前数据有没有添加进数据库，检查增量
-				// 没有添加的就添加
-				if !db.ExistData(rssItem.GuidValue) {
-					addRSSClient(clientName, path, pause, client, rssItem)
+				if isOneRSS {
+					// 判断是否要下载已存在的RSS订阅
+					if download {
+						// 下载rss到tr客服端
+						addRSSClient(clientName, path, pause, client, rssItem)
+					} else {
+						// 直接添加到数据库
+						db.InsertData(rssItem.GuidValue, rssItem.Title, rssItem.Enclosure.Url, rssItem.Link,
+							rssItem.Enclosure.Type, rssItem.Enclosure.Length, rssItem.PubDate)
+					}
+				} else {
+					// 不是第一次
+					// 判断当前数据有没有添加进数据库，检查增量
+					// 没有添加的就添加
+					if !db.ExistData(rssItem.GuidValue) {
+						addRSSClient(clientName, path, pause, client, rssItem)
+					}
 				}
 			}
 		})
 	} else {
 		PrintNonClientHelp()
+		// 退出程序
+		Exit()
 	}
 }
 
 func addRSSClient(clientName string, path string, pause bool, client util.Client, rssItem util.RSSItem) {
 	if clientName == defaultTrClientName {
-		util.TrAdd(client, util.TransmissionAdd{
-			"", rssItem.Enclosure.Url,
-			path, pause},
+		util.TrAdd(client, util.TransmissionAdd{Filename: rssItem.Enclosure.Url, DownloadDir: path, Paused: pause},
 			func(body []byte, res *http.Response, addResult util.TransmissionAddResult, err error) {
 				torrent := addResult.Result.Arguments.(map[string]interface{})
 				tid := torrent["id"]
@@ -166,9 +184,9 @@ func addRSSClient(clientName string, path string, pause bool, client util.Client
 				db.InsertDatas(tid, rssItem.GuidValue, hash, rssItem.Title, name, rssItem.Enclosure.Url,
 					rssItem.Link, rssItem.Enclosure.Type, rssItem.Enclosure.Length, rssItem.PubDate)
 				if addResult.Flag == "add" {
-					fmt.Printf("添加种子 %s 成功, 是否自动下载: %t\n", torrent["name"], !pause)
+					fmt.Printf("添加种子 %s 成功, 是否自动下载: %t\n", rssItem.Title, !pause)
 				} else if addResult.Flag == "duplicate" {
-					fmt.Printf("重复的种子 %s, 不会被添加\n", torrent["name"])
+					fmt.Printf("重复的种子 %s, 不会被添加\n", rssItem.Title)
 				}
 			})
 	}
@@ -201,6 +219,20 @@ func AddTrClient(local string, user string, pwd string) {
 	})
 }
 
+func Exit() {
+	db.GetInstance().Close()
+	<-stop(cronInstance)
+}
+
+func stop(cron *cron.Cron) chan bool {
+	ch := make(chan bool)
+	go func() {
+		cron.Stop()
+		ch <- true
+	}()
+	return ch
+}
+
 func PrintClientHelp() {
 	fmt.Println("使用命令 './ptrss get --client' 查看已添加的客服端")
 }
@@ -216,5 +248,5 @@ func PrintRSSHelp() {
 
 func PrintNonRSSHelp() {
 	fmt.Print("还没有添加RSS, ")
-	PrintClientHelp()
+	PrintRSSHelp()
 }
