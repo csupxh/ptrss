@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/devfacet/gocmd"
 	"github.com/robfig/cron"
-	"github.com/zzyandzzy/ptrss/db"
 	"github.com/zzyandzzy/ptrss/util"
 	"net/http"
 	"strconv"
@@ -51,7 +50,7 @@ var (
 )
 
 func main() {
-	db.Init()
+	Init()
 	Cmd()
 }
 
@@ -90,7 +89,7 @@ func Cmd() {
 
 	gocmd.HandleFlag("Get", func(cmd *gocmd.Cmd, args []string) error {
 		if flags.Get.Client != "" {
-			client := db.QueryClient(flags.Get.Client)
+			client := QueryClient(flags.Get.Client)
 			if client.Id != 0 {
 				fmt.Printf("%#v\n", client)
 			} else {
@@ -98,7 +97,7 @@ func Cmd() {
 			}
 		}
 		if flags.Get.RSS != "" {
-			for _, rss := range db.QueryRSS(flags.Get.RSS) {
+			for _, rss := range QueryRSS(flags.Get.RSS) {
 				fmt.Printf("%#v\n", rss)
 			}
 		} else {
@@ -132,16 +131,16 @@ func Cmd() {
 }
 
 func AddRSS(clientName string, url string, path string, pause bool, refresh int, download bool, category string) {
-	clientDB := db.QueryClient(clientName)
+	clientDB := QueryClient(clientName)
 	if clientDB.Id != 0 {
 		client := util.Client{Local: clientDB.Local, User: clientDB.User, Pwd: clientDB.Pwd}
 		util.GetBody(url, func(channel util.RSSChannel) {
 			isOneRSS := false
 			// 先判断rss有没有添加进数据库
 			// 没有说明是第一次添加
-			if !db.ExistRSS(url) {
+			if !ExistRSS(url) {
 				isOneRSS = true
-				db.InsertRSS(url, clientDB.Id, path, pause, refresh, category)
+				InsertRSS(url, clientDB.Id, path, pause, refresh, category)
 				fmt.Printf("获取到 %s 共 %d 条信息\n: ", channel.Title, len(channel.Items))
 			}
 			for _, rssItem := range channel.Items {
@@ -152,14 +151,14 @@ func AddRSS(clientName string, url string, path string, pause bool, refresh int,
 						addRSSClient(clientName, path, pause, client, rssItem)
 					} else {
 						// 直接添加到数据库
-						db.InsertData(rssItem.GuidValue, rssItem.Title, rssItem.Enclosure.Url, rssItem.Link,
+						InsertData(rssItem.GuidValue, rssItem.Title, rssItem.Enclosure.Url, rssItem.Link,
 							rssItem.Enclosure.Type, rssItem.Enclosure.Length, rssItem.PubDate)
 					}
 				} else {
 					// 不是第一次
 					// 判断当前数据有没有添加进数据库，检查增量
 					// 没有添加的就添加
-					if !db.ExistData(rssItem.GuidValue) {
+					if !ExistData(rssItem.GuidValue) {
 						addRSSClient(clientName, path, pause, client, rssItem)
 					}
 				}
@@ -181,7 +180,7 @@ func addRSSClient(clientName string, path string, pause bool, client util.Client
 				hash := torrent["hashString"]
 				name := torrent["name"]
 				// 插入数据到数据库
-				db.InsertDatas(tid, rssItem.GuidValue, hash, rssItem.Title, name, rssItem.Enclosure.Url,
+				InsertDatas(tid, rssItem.GuidValue, hash, rssItem.Title, name, rssItem.Enclosure.Url,
 					rssItem.Link, rssItem.Enclosure.Type, rssItem.Enclosure.Length, rssItem.PubDate)
 				if addResult.Flag == "add" {
 					fmt.Printf("添加种子 %s 成功, 是否自动下载: %t\n", rssItem.Title, !pause)
@@ -205,7 +204,7 @@ func AddTrClient(local string, user string, pwd string) {
 				// 连接成功
 				if result.Result == "success" {
 					// 插入数据
-					if db.InsertClient(defaultTrClientName, local, user, pwd) {
+					if InsertClient(defaultTrClientName, local, user, pwd) {
 						fmt.Println("添加客服端成功")
 					} else {
 						fmt.Print("插入数据库失败, 可能已经添加\n")
@@ -220,7 +219,7 @@ func AddTrClient(local string, user string, pwd string) {
 }
 
 func Exit() {
-	db.GetInstance().Close()
+	GetInstance().Close()
 	<-stop(cronInstance)
 }
 

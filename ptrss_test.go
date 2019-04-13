@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/zzyandzzy/ptrss/db"
 	"github.com/zzyandzzy/ptrss/util"
 	"net/http"
 	"testing"
@@ -26,7 +25,7 @@ func AddClient() {
 	util.TrConnect(tr, func(body []byte, res *http.Response, result util.TransmissionResult, err error) {
 		if res.StatusCode == 200 {
 			if result.Result == "success" {
-				if db.InsertClient("tr", local, user, pwd) {
+				if InsertClient("tr", local, user, pwd) {
 					fmt.Printf("add client: %s success\n", "tr")
 				}
 			}

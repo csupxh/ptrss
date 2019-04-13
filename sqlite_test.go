@@ -1,9 +1,13 @@
-package db
+package main
 
 import (
 	"fmt"
 	"testing"
 )
+
+func TestInstance(t *testing.T) {
+	Instance()
+}
 
 func TestInit(t *testing.T) {
 	Init()
